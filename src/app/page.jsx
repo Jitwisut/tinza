@@ -1,89 +1,33 @@
-// app/page.jsx
 "use client";
 
 import { useState, useEffect, useRef } from "react";
 const api = process.env.NEXT_PUBLIC_WS_API;
 
-// --- Sub-components for UI ---
+// --- Sub-components ---
 
-// 1. Toast Notification Component
 const ToastContainer = ({ toasts, removeToast }) => {
   return (
     <div className="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none">
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`
-            pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg transform transition-all duration-300 animate-in slide-in-from-right
-            ${
-              toast.type === "error"
-                ? "bg-red-500 text-white"
-                : toast.type === "success"
-                ? "bg-green-500 text-white"
-                : "bg-gray-800 text-white"
-            }
-          `}
+          className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg transform transition-all duration-300 animate-in slide-in-from-right ${
+            toast.type === "error"
+              ? "bg-red-500 text-white"
+              : toast.type === "success"
+              ? "bg-green-500 text-white"
+              : "bg-gray-800 text-white"
+          }`}
         >
-          {toast.type === "success" && (
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
-          )}
-          {toast.type === "error" && (
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          )}
           <span className="text-sm font-medium">{toast.message}</span>
-          <button
-            onClick={() => removeToast(toast.id)}
-            className="ml-2 opacity-70 hover:opacity-100"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
         </div>
       ))}
     </div>
   );
 };
 
-// 2. Avatar Component
 const UserAvatar = ({ name, size = "large" }) => {
   const getInitials = (n) => (n ? n.substring(0, 2).toUpperCase() : "??");
-
-  // ใช้ useMemo หรือ algorithm ที่ให้ค่าเดิมเสมอเพื่อป้องกัน Hydration Error
   const stringToColor = (str) => {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -92,10 +36,8 @@ const UserAvatar = ({ name, size = "large" }) => {
     const c = (hash & 0x00ffffff).toString(16).toUpperCase();
     return "#" + "00000".substring(0, 6 - c.length) + c;
   };
-
   const bgColor = stringToColor(name || "User");
-  const sizeClass =
-    size === "large" ? "w-32 h-32 text-4xl" : "w-12 h-12 text-lg";
+  const sizeClass = size === "large" ? "w-32 h-32 text-4xl" : "w-12 h-12 text-lg";
 
   return (
     <div
@@ -117,6 +59,7 @@ export default function VoiceChat() {
   const [isMatched, setIsMatched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [liked, setLiked] = useState(false);
+  const [audioError, setAudioError] = useState(false); // New: เช็คว่าเสียงมีปัญหาไหม
 
   const [toasts, setToasts] = useState([]);
 
@@ -127,31 +70,30 @@ export default function VoiceChat() {
   const remoteAudioRef = useRef(null);
   const partnerIdRef = useRef(null);
 
-  // Constants for animation (Defined here to avoid Hydration mismatch)
   const WAVE_DELAYS = [0.1, 0.3, 0.5, 0.2, 0.4, 0.6, 0.3, 0.5];
 
+  // ✅ 1. เพิ่ม STUN Server หลายตัวเพื่อความชัวร์
+  // หมายเหตุ: หากต้องการให้คุยข้ามเน็ต 4G ได้ 100% ต้องไปเช่า TURN Server มาใส่ใน array นี้ครับ
   const iceServers = {
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
+    ],
   };
 
-  // Toast Helpers
   const addToast = (message, type = "info") => {
     const id = Date.now();
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
   };
 
-  const removeToast = (id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+  const removeToast = (id) => setToasts((prev) => prev.filter((t) => t.id !== id));
 
   useEffect(() => {
-    // Cleanup on unmount
-    return () => {
-      cleanupResources();
-    };
+    return () => cleanupResources();
   }, []);
 
   const cleanupResources = () => {
@@ -159,6 +101,38 @@ export default function VoiceChat() {
     if (peerConnectionRef.current) peerConnectionRef.current.close();
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+  };
+
+  // ฟังก์ชันช่วยเล่นเสียง (ใช้แก้ปัญหา Mobile Autoplay)
+  const forcePlayAudio = () => {
+    if (remoteAudioRef.current && remoteAudioRef.current.srcObject) {
+      remoteAudioRef.current
+        .play()
+        .then(() => {
+          console.log("Audio resumed manually");
+          setAudioError(false);
+        })
+        .catch((e) => console.error("Manual play failed", e));
+    }
+  };
+
+  // ✅ Logic การต่อ Stream ที่ใช้ร่วมกันทั้งคนโทรและคนรับ
+  const attachRemoteStream = (event) => {
+    console.log("🔊 Received Remote Stream:", event.streams[0]);
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = event.streams[0];
+      remoteAudioRef.current
+        .play()
+        .then(() => {
+          console.log("🎶 Audio playing successfully");
+          setAudioError(false);
+        })
+        .catch((e) => {
+          console.error("❌ Auto-play failed (Browser blocked):", e);
+          setAudioError(true); // แจ้งเตือนให้ user กดปุ่มเปิดเสียง
+          addToast("Tap the speaker icon to enable sound", "error");
+        });
     }
   };
 
@@ -172,9 +146,6 @@ export default function VoiceChat() {
     setIsSearching(true);
     setStatus("Looking for a partner...");
 
-    // *** ตรวจสอบ URL WebSocket ให้ตรงกับ Server ของคุณ ***
-    // ถ้า run local ปกติจะเป็น ws://localhost:3000 (ถ้ามี Custom Server)
-    // หรือต้องมี backend แยกต่างหาก
     try {
       wsRef.current = new WebSocket(`${api}/match`);
     } catch (e) {
@@ -185,12 +156,7 @@ export default function VoiceChat() {
     }
 
     wsRef.current.onopen = () => {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "find_partner",
-          nickname: nickname,
-        })
-      );
+      wsRef.current.send(JSON.stringify({ type: "find_partner", nickname }));
     };
 
     wsRef.current.onmessage = async (event) => {
@@ -206,6 +172,7 @@ export default function VoiceChat() {
           setStatus("Connected");
           setIsMatched(true);
           setLiked(false);
+          setAudioError(false); // Reset error
           addToast(`Matched with ${data.partnerNickname}!`, "success");
           await startCall();
         } else if (data.type === "offer") {
@@ -229,68 +196,30 @@ export default function VoiceChat() {
     wsRef.current.onerror = (error) => {
       console.error("WebSocket error:", error);
       setStatus("Connection error.");
-      addToast("Connection failed. Is the server running?", "error");
+      addToast("Connection failed", "error");
       setIsStarted(false);
     };
   };
 
   const startCall = async () => {
     try {
-      console.log("🚀 Starting call..."); // Log เริ่มต้น
+      console.log("🚀 Starting call...");
+      if (!navigator.mediaDevices) throw new Error("Media devices not supported");
 
-      if (!navigator.mediaDevices) {
-        throw new Error("Media devices not supported");
-      }
-
-      // 1. Get Local Stream
       localStreamRef.current = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: false,
       });
-      console.log("✅ Microphone accessed");
 
-      // 2. Create Peer Connection
-      // ตรวจสอบตัวแปร iceServers ให้แน่ใจว่าประกาศไว้ถูกต้องข้างบน component
       peerConnectionRef.current = new RTCPeerConnection(iceServers);
 
-      // 3. Add Tracks to Connection
       localStreamRef.current.getTracks().forEach((track) => {
         peerConnectionRef.current.addTrack(track, localStreamRef.current);
       });
 
-      // 4. Handle Remote Stream (จุดสำคัญเรื่องเสียง)
-      peerConnectionRef.current.ontrack = (event) => {
-        console.log("🔊 Stream Received from Partner:", event.streams);
-        const [remoteStream] = event.streams;
+      // ✅ ใช้ Logic กลาง
+      peerConnectionRef.current.ontrack = attachRemoteStream;
 
-        if (remoteAudioRef.current) {
-          console.log("🔗 Attaching stream to audio element...");
-          remoteAudioRef.current.srcObject = remoteStream;
-
-          // บังคับเล่นเสียง
-          remoteAudioRef.current
-            .play()
-            .then(() => console.log("🎶 Audio playing successfully"))
-            .catch((e) => console.error("❌ Auto-play failed:", e));
-        } else {
-          // ถ้า Ref ยังไม่มา (เพราะ React Render ไม่ทัน) ให้ Log เตือน
-          console.error(
-            "❌ Error: remoteAudioRef is null! (Audio element missing)"
-          );
-
-          // *Hack แก้ขัด: ถ้า Ref ยังไม่มี ให้ลองหา element ตรงๆ จาก ID (ถ้าคุณใส่ id="remote-audio" ไว้ที่ tag audio)
-          const fallbackAudio = document.getElementById("remote-audio"); // ต้องเพิ่ม id="remote-audio" ที่ JSX
-          if (fallbackAudio) {
-            console.log("⚠️ Found audio via ID fallback");
-            fallbackAudio.srcObject = remoteStream;
-            fallbackAudio
-              .play()
-              .catch((e) => console.error("Fallback play error", e));
-          }
-        }
-      };
-
-      // 5. Handle ICE Candidates
       peerConnectionRef.current.onicecandidate = (event) => {
         if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(
@@ -303,13 +232,10 @@ export default function VoiceChat() {
         }
       };
 
-      // 6. Create Offer
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
 
-      // 7. Send Offer via WebSocket
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        console.log("📤 Sending Offer...");
         wsRef.current.send(
           JSON.stringify({
             type: "offer",
@@ -320,7 +246,7 @@ export default function VoiceChat() {
       }
     } catch (error) {
       console.error("❌ Error starting call:", error);
-      addToast("Microphone access denied or error.", "error");
+      addToast("Microphone access denied", "error");
     }
   };
 
@@ -333,25 +259,14 @@ export default function VoiceChat() {
         });
       }
 
-      // ใช้ iceServers ตัวเดียวกับที่ประกาศไว้
       peerConnectionRef.current = new RTCPeerConnection(iceServers);
 
       localStreamRef.current.getTracks().forEach((track) => {
         peerConnectionRef.current.addTrack(track, localStreamRef.current);
       });
 
-      // --- ✅ จุดสำคัญ: ใส่ Logic การรับเสียงให้เหมือน startCall ---
-      peerConnectionRef.current.ontrack = (event) => {
-        console.log("🔊 Receiver got stream:", event.streams[0]);
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = event.streams[0];
-          remoteAudioRef.current
-            .play()
-            .then(() => console.log("Audio playing..."))
-            .catch((e) => console.error("Auto-play blocked:", e));
-        }
-      };
-      // -----------------------------------------------------
+      // ✅ ใช้ Logic กลาง (สำคัญมาก: ต้องมีทั้งใน startCall และ handleOffer)
+      peerConnectionRef.current.ontrack = attachRemoteStream;
 
       peerConnectionRef.current.onicecandidate = (event) => {
         if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
@@ -380,6 +295,7 @@ export default function VoiceChat() {
       console.error(error);
     }
   };
+
   const handleAnswer = async (answer) => {
     try {
       await peerConnectionRef.current.setRemoteDescription(answer);
@@ -396,6 +312,17 @@ export default function VoiceChat() {
     }
   };
 
+  const nextPartner = () => {
+    cleanupCall();
+    setIsMatched(false);
+    setIsSearching(true);
+    setPartnerName("");
+    setStatus("Looking for a new partner...");
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ type: "next", nickname }));
+    }
+  };
+
   const cleanupCall = () => {
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
@@ -405,29 +332,12 @@ export default function VoiceChat() {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = null;
-    }
-  };
-
-  const nextPartner = () => {
-    cleanupCall();
-    setIsMatched(false);
-    setIsSearching(true);
-    setPartnerName("");
-    setStatus("Looking for a new partner...");
-    addToast("Skipping... Finding new partner", "info");
-
-    if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ type: "next", nickname: nickname }));
-    }
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
   };
 
   const toggleLike = () => {
     setLiked(!liked);
-    if (!liked) {
-      addToast(`You liked ${partnerName}!`, "success");
-    }
+    if (!liked) addToast(`You liked ${partnerName}!`, "success");
   };
 
   const endCall = () => {
@@ -442,8 +352,10 @@ export default function VoiceChat() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-purple-500 selection:text-white overflow-hidden relative">
-      {/* Inject Keyframes Styles locally to avoid config issues */}
+      {/* ✅ AUDIO ELEMENT ย้ายมาอยู่นอกสุด เพื่อให้ทำงานตลอดเวลา */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+
+      {/* Style Injection */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -451,11 +363,14 @@ export default function VoiceChat() {
           0% { height: 30%; opacity: 0.5; }
           100% { height: 100%; opacity: 1; }
         }
+        @keyframes pulse-ring {
+          0% { transform: scale(0.8); opacity: 0.5; }
+          100% { transform: scale(1.3); opacity: 0; }
+        }
       `,
         }}
       />
 
-      {/* Background Decor */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-600/20 rounded-full blur-[100px]" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-600/20 rounded-full blur-[100px]" />
@@ -465,25 +380,11 @@ export default function VoiceChat() {
 
       <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-4">
         {/* Header Logo */}
-        <div
-          className={`transition-all duration-500 ${
-            isStarted ? "mb-4 scale-75" : "mb-10"
-          }`}
-        >
+        <div className={`transition-all duration-500 ${isStarted ? "mb-4 scale-75" : "mb-10"}`}>
           <div className="flex flex-col items-center">
             <div className="w-16 h-16 bg-gradient-to-tr from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-500/30 mb-4 transform rotate-3">
-              <svg
-                className="w-8 h-8 text-white"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                />
+              <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
               </svg>
             </div>
             <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
@@ -492,17 +393,14 @@ export default function VoiceChat() {
           </div>
         </div>
 
-        {/* --- SCENE 1: LOGIN --- */}
+        {/* SCENE 1: LOGIN */}
         {!isStarted && (
           <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
-            <p className="text-gray-400 text-center mb-6">
-              Enter a nickname to start talking with strangers anonymously.
-            </p>
-
+            <p className="text-gray-400 text-center mb-6">Enter a nickname to start talking with strangers anonymously.</p>
             <div className="space-y-4">
               <input
                 type="text"
-                className="w-full bg-black/20 border border-white/10 rounded-xl px-5 py-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                className="w-full bg-black/20 border border-white/10 rounded-xl px-5 py-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
                 placeholder="Your cool nickname..."
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
@@ -511,7 +409,7 @@ export default function VoiceChat() {
               />
               <button
                 onClick={findPartner}
-                className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl font-bold text-white shadow-lg shadow-purple-600/30 hover:shadow-purple-600/50 transform hover:scale-[1.02] active:scale-95 transition-all duration-200"
+                className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl font-bold text-white shadow-lg hover:scale-[1.02] transition-all"
               >
                 Start Matching
               </button>
@@ -519,47 +417,49 @@ export default function VoiceChat() {
           </div>
         )}
 
-        {/* --- SCENE 2: SEARCHING --- */}
+        {/* SCENE 2: SEARCHING */}
         {isStarted && isSearching && (
           <div className="flex flex-col items-center animate-pulse">
             <div className="relative mb-8">
               <div className="w-32 h-32 bg-purple-500/20 rounded-full absolute inset-0 animate-ping"></div>
               <UserAvatar name={nickname} />
             </div>
-            <h2 className="text-2xl font-semibold text-white mb-2">
-              Searching...
-            </h2>
-            <button
-              onClick={endCall}
-              className="mt-8 text-gray-500 hover:text-red-400 text-sm font-medium transition-colors"
-            >
+            <h2 className="text-2xl font-semibold text-white mb-2">Searching...</h2>
+            <button onClick={endCall} className="mt-8 text-gray-500 hover:text-red-400 text-sm font-medium transition-colors">
               Cancel
             </button>
           </div>
         )}
 
-        {/* --- SCENE 3: MATCHED --- */}
+        {/* SCENE 3: MATCHED */}
         {isStarted && isMatched && (
           <div className="w-full max-w-sm relative">
             <div className="bg-gray-800/80 backdrop-blur-md border border-white/10 rounded-[2.5rem] p-6 shadow-2xl overflow-hidden relative">
               <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-1 bg-green-500/20 border border-green-500/30 rounded-full">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-xs font-bold text-green-400 uppercase tracking-wider">
-                  Live
-                </span>
+                <span className="text-xs font-bold text-green-400 uppercase tracking-wider">Live</span>
               </div>
+
+              {/* ✅ ปุ่มแก้ปัญหาเสียง: แสดงเมื่อ Browser Block Autoplay */}
+              {audioError && (
+                <button
+                  onClick={forcePlayAudio}
+                  className="absolute top-6 right-6 flex items-center gap-2 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg z-50 animate-bounce"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  </svg>
+                  <span className="text-xs font-bold">Tap to Unmute</span>
+                </button>
+              )}
 
               <div className="flex flex-col items-center mt-8 mb-6">
                 <UserAvatar name={partnerName} size="large" />
-
                 <div className="mt-6 text-center">
-                  <h2 className="text-3xl font-bold text-white mb-1">
-                    {partnerName}
-                  </h2>
+                  <h2 className="text-3xl font-bold text-white mb-1">{partnerName}</h2>
                   <p className="text-gray-400 text-sm">Online Stranger</p>
                 </div>
 
-                {/* Audio Visualizer (Fixed Hydration Error) */}
                 <div className="flex items-center gap-1 h-8 mt-6">
                   {WAVE_DELAYS.map((delay, i) => (
                     <div
@@ -576,84 +476,31 @@ export default function VoiceChat() {
               </div>
 
               <div className="grid grid-cols-3 gap-4 mt-8">
-                {/* End Button */}
-                <button
-                  onClick={endCall}
-                  className="flex flex-col items-center justify-center gap-1 group"
-                >
-                  <div className="w-14 h-14 bg-gray-700/50 rounded-full flex items-center justify-center group-hover:bg-red-500/20 group-hover:text-red-500 transition-all border border-transparent group-hover:border-red-500/50">
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
+                <button onClick={endCall} className="flex flex-col items-center justify-center gap-1 group">
+                  <div className="w-14 h-14 bg-gray-700/50 rounded-full flex items-center justify-center group-hover:bg-red-500/20 group-hover:text-red-500 transition-all">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </div>
                   <span className="text-xs text-gray-500 font-medium">End</span>
                 </button>
 
-                {/* Like Button */}
-                <button
-                  onClick={toggleLike}
-                  className="flex flex-col items-center justify-center gap-1 group"
-                >
-                  <div
-                    className={`w-16 h-16 rounded-full flex items-center justify-center transition-all transform hover:scale-110 shadow-lg ${
-                      liked
-                        ? "bg-pink-500 text-white shadow-pink-500/40"
-                        : "bg-white text-pink-500"
-                    }`}
-                  >
-                    <svg
-                      className={`w-8 h-8 ${
-                        liked ? "fill-current" : "fill-none"
-                      }`}
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-                      />
+                <button onClick={toggleLike} className="flex flex-col items-center justify-center gap-1 group">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-all transform hover:scale-110 shadow-lg ${liked ? "bg-pink-500 text-white" : "bg-white text-pink-500"}`}>
+                    <svg className={`w-8 h-8 ${liked ? "fill-current" : "fill-none"}`} stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                     </svg>
                   </div>
-                  <span className="text-xs text-gray-500 font-medium">
-                    Like
-                  </span>
+                  <span className="text-xs text-gray-500 font-medium">Like</span>
                 </button>
 
-                {/* Next Button */}
-                <button
-                  onClick={nextPartner}
-                  className="flex flex-col items-center justify-center gap-1 group"
-                >
-                  <div className="w-14 h-14 bg-gray-700/50 rounded-full flex items-center justify-center group-hover:bg-purple-500/20 group-hover:text-purple-400 transition-all border border-transparent group-hover:border-purple-500/50">
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13 5l7 7-7 7M5 5l7 7-7 7"
-                      />
+                <button onClick={nextPartner} className="flex flex-col items-center justify-center gap-1 group">
+                  <div className="w-14 h-14 bg-gray-700/50 rounded-full flex items-center justify-center group-hover:bg-purple-500/20 group-hover:text-purple-400 transition-all">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
                     </svg>
                   </div>
-                  <span className="text-xs text-gray-500 font-medium">
-                    Next
-                  </span>
+                  <span className="text-xs text-gray-500 font-medium">Next</span>
                 </button>
               </div>
             </div>
