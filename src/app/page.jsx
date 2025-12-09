@@ -333,20 +333,25 @@ export default function VoiceChat() {
         });
       }
 
+      // ใช้ iceServers ตัวเดียวกับที่ประกาศไว้
       peerConnectionRef.current = new RTCPeerConnection(iceServers);
 
       localStreamRef.current.getTracks().forEach((track) => {
         peerConnectionRef.current.addTrack(track, localStreamRef.current);
       });
 
+      // --- ✅ จุดสำคัญ: ใส่ Logic การรับเสียงให้เหมือน startCall ---
       peerConnectionRef.current.ontrack = (event) => {
+        console.log("🔊 Receiver got stream:", event.streams[0]);
         if (remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = event.streams[0];
           remoteAudioRef.current
             .play()
+            .then(() => console.log("Audio playing..."))
             .catch((e) => console.error("Auto-play blocked:", e));
         }
       };
+      // -----------------------------------------------------
 
       peerConnectionRef.current.onicecandidate = (event) => {
         if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
@@ -375,7 +380,6 @@ export default function VoiceChat() {
       console.error(error);
     }
   };
-
   const handleAnswer = async (answer) => {
     try {
       await peerConnectionRef.current.setRemoteDescription(answer);
