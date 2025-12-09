@@ -50,6 +50,37 @@ const UserAvatar = ({ name, size = "large" }) => {
   );
 };
 
+// --- Config ICE Servers ---
+const iceServers = {
+  iceServers: [
+    // STUN Servers
+    { urls: "stun:stun.relay.metered.ca:80" },
+    { urls: "stun:stun.l.google.com:19302" },
+
+    // ✅ TURN Servers (Metered)
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: "e79fd9d985751a7176e4e1de",
+      credential: "nkgrV/MuhOIUh8kC",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:80?transport=tcp",
+      username: "e79fd9d985751a7176e4e1de",
+      credential: "nkgrV/MuhOIUh8kC",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443",
+      username: "e79fd9d985751a7176e4e1de",
+      credential: "nkgrV/MuhOIUh8kC",
+    },
+    {
+      urls: "turns:global.relay.metered.ca:443?transport=tcp",
+      username: "e79fd9d985751a7176e4e1de",
+      credential: "nkgrV/MuhOIUh8kC",
+    },
+  ],
+};
+
 // --- Main Component ---
 
 export default function VoiceChat() {
@@ -60,7 +91,7 @@ export default function VoiceChat() {
   const [isMatched, setIsMatched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [liked, setLiked] = useState(false);
-  const [audioError, setAudioError] = useState(false); // New: เช็คว่าเสียงมีปัญหาไหม
+  const [audioError, setAudioError] = useState(false);
 
   const [toasts, setToasts] = useState([]);
 
@@ -72,38 +103,6 @@ export default function VoiceChat() {
   const partnerIdRef = useRef(null);
 
   const WAVE_DELAYS = [0.1, 0.3, 0.5, 0.2, 0.4, 0.6, 0.3, 0.5];
-
-  // ✅ 1. เพิ่ม STUN Server หลายตัวเพื่อความชัวร์
-  // หมายเหตุ: หากต้องการให้คุยข้ามเน็ต 4G ได้ 100% ต้องไปเช่า TURN Server มาใส่ใน array นี้ครับ
-  const iceServers = {
-    iceServers: [
-      // STUN Servers
-      { urls: "stun:stun.relay.metered.ca:80" },
-      { urls: "stun:stun.l.google.com:19302" },
-
-      // ✅ TURN Servers (Metered - ใส่ credentials ที่ได้จาก API Docs)
-      {
-        urls: "turn:global.relay.metered.ca:80",
-        username: "e79fd9d985751a7176e4e1de",
-        credential: "nkgrV/MuhOIUh8kC",
-      },
-      {
-        urls: "turn:global.relay.metered.ca:80?transport=tcp",
-        username: "e79fd9d985751a7176e4e1de",
-        credential: "nkgrV/MuhOIUh8kC",
-      },
-      {
-        urls: "turn:global.relay.metered.ca:443",
-        username: "e79fd9d985751a7176e4e1de",
-        credential: "nkgrV/MuhOIUh8kC",
-      },
-      {
-        urls: "turns:global.relay.metered.ca:443?transport=tcp",
-        username: "e79fd9d985751a7176e4e1de",
-        credential: "nkgrV/MuhOIUh8kC",
-      },
-    ],
-  };
 
   const addToast = (message, type = "info") => {
     const id = Date.now();
@@ -129,22 +128,10 @@ export default function VoiceChat() {
     }
   };
 
-  // ฟังก์ชันช่วยเล่นเสียง (ใช้แก้ปัญหา Mobile Autoplay)
   const forcePlayAudio = () => {
     if (remoteAudioRef.current && remoteAudioRef.current.srcObject) {
-      // ✅ เช็คและ enable audio tracks
-      const stream = remoteAudioRef.current.srcObject;
-      const audioTracks = stream.getAudioTracks();
-
-      console.log("🔧 Force play - Audio tracks:", audioTracks);
-      audioTracks.forEach((track) => {
-        console.log("Track enabled:", track.enabled, "muted:", track.muted);
-        track.enabled = true; // ✅ บังคับเปิด
-      });
-
       remoteAudioRef.current.muted = false;
       remoteAudioRef.current.volume = 1.0;
-
       remoteAudioRef.current
         .play()
         .then(() => {
@@ -158,33 +145,60 @@ export default function VoiceChat() {
     }
   };
 
-  // ✅ Logic การต่อ Stream ที่ใช้ร่วมกันทั้งคนโทรและคนรับ
-  const attachRemoteStream = (event) => {
-    console.log("🔊 Received Remote Stream:", event.streams[0]);
-
-    // ✅ เช็ค audio tracks
-    const audioTracks = event.streams[0].getAudioTracks();
-    console.log("📡 Audio tracks:", audioTracks.length, audioTracks);
-
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = event.streams[0];
-
-      // ✅ บังคับ unmute และ set volume
-      remoteAudioRef.current.muted = false;
-      remoteAudioRef.current.volume = 1.0;
-
-      remoteAudioRef.current
-        .play()
-        .then(() => {
-          console.log("🎶 Audio playing successfully");
-          setAudioError(false);
-        })
-        .catch((e) => {
-          console.error("❌ Auto-play failed:", e);
-          setAudioError(true);
-          addToast("Tap the speaker icon to enable sound", "error");
-        });
+  // ✅ Setup Peer Connection Logic
+  const setupPeerConnection = () => {
+    // ป้องกันการสร้างซ้ำ
+    if (peerConnectionRef.current) {
+      console.warn("⚠️ PC already exists, closing old one.");
+      peerConnectionRef.current.close();
     }
+
+    const pc = new RTCPeerConnection(iceServers);
+
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      console.log("🧊 ICE State:", state);
+      if (state === "failed" || state === "disconnected") {
+        addToast("Connection unstable/failed", "error");
+      }
+    };
+
+    pc.ontrack = (event) => {
+      console.log("🔊 Received Remote Stream:", event.streams[0]);
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = event.streams[0];
+        remoteAudioRef.current.muted = false;
+
+        // Try playing
+        const playPromise = remoteAudioRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log("🎶 Audio playing successfully");
+              setAudioError(false);
+            })
+            .catch((e) => {
+              console.error("❌ Auto-play failed:", e);
+              setAudioError(true);
+              addToast("Tap the speaker icon to enable sound", "error");
+            });
+        }
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "ice",
+            candidate: event.candidate,
+            partnerId: partnerIdRef.current,
+          })
+        );
+      }
+    };
+
+    return pc;
   };
 
   const findPartner = async () => {
@@ -223,9 +237,16 @@ export default function VoiceChat() {
           setStatus("Connected");
           setIsMatched(true);
           setLiked(false);
-          setAudioError(false); // Reset error
+          setAudioError(false);
           addToast(`Matched with ${data.partnerNickname}!`, "success");
-          await startCall();
+
+          // ✅ FIX: เช็ค initiator! ถ้าเป็น true ค่อยโทร, ถ้า false รอนิ่งๆ
+          if (data.initiator) {
+            console.log("I am initiator, starting call...");
+            await startCall();
+          } else {
+            console.log("I am receiver, waiting for offer...");
+          }
         } else if (data.type === "offer") {
           await handleOffer(data.offer);
         } else if (data.type === "answer") {
@@ -263,26 +284,11 @@ export default function VoiceChat() {
         video: false,
       });
 
-      peerConnectionRef.current = new RTCPeerConnection(iceServers);
+      peerConnectionRef.current = setupPeerConnection();
 
       localStreamRef.current.getTracks().forEach((track) => {
         peerConnectionRef.current.addTrack(track, localStreamRef.current);
       });
-
-      // ✅ ใช้ Logic กลาง
-      peerConnectionRef.current.ontrack = attachRemoteStream;
-
-      peerConnectionRef.current.onicecandidate = (event) => {
-        if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: "ice",
-              candidate: event.candidate,
-              partnerId: partnerIdRef.current,
-            })
-          );
-        }
-      };
 
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
@@ -311,26 +317,12 @@ export default function VoiceChat() {
         });
       }
 
-      peerConnectionRef.current = new RTCPeerConnection(iceServers);
+      // Receiver สร้าง PC เพื่อรับ Offer
+      peerConnectionRef.current = setupPeerConnection();
 
       localStreamRef.current.getTracks().forEach((track) => {
         peerConnectionRef.current.addTrack(track, localStreamRef.current);
       });
-
-      // ✅ ใช้ Logic กลาง (สำคัญมาก: ต้องมีทั้งใน startCall และ handleOffer)
-      peerConnectionRef.current.ontrack = attachRemoteStream;
-
-      peerConnectionRef.current.onicecandidate = (event) => {
-        if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: "ice",
-              candidate: event.candidate,
-              partnerId: partnerIdRef.current,
-            })
-          );
-        }
-      };
 
       await peerConnectionRef.current.setRemoteDescription(offer);
       const answer = await peerConnectionRef.current.createAnswer();
@@ -350,17 +342,26 @@ export default function VoiceChat() {
 
   const handleAnswer = async (answer) => {
     try {
+      // ✅ เช็ค State ก่อน Set Remote
+      if (peerConnectionRef.current.signalingState === "stable") {
+        console.warn(
+          "⚠️ Connection is already stable, ignoring duplicate answer."
+        );
+        return;
+      }
       await peerConnectionRef.current.setRemoteDescription(answer);
     } catch (error) {
-      console.error(error);
+      console.error("Handle Answer Error:", error);
     }
   };
 
   const handleIceCandidate = async (candidate) => {
     try {
-      await peerConnectionRef.current.addIceCandidate(candidate);
+      if (peerConnectionRef.current) {
+        await peerConnectionRef.current.addIceCandidate(candidate);
+      }
     } catch (error) {
-      console.error(error);
+      console.error("ICE Error:", error);
     }
   };
 
@@ -404,13 +405,11 @@ export default function VoiceChat() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-purple-500 selection:text-white overflow-hidden relative">
-      {/* ✅ AUDIO ELEMENT ย้ายมาอยู่นอกสุด เพื่อให้ทำงานตลอดเวลา */}
       <audio
         ref={remoteAudioRef}
         autoPlay
         playsInline
-        muted={false}
-        className="hidden"
+        className="absolute w-1 h-1 opacity-0 pointer-events-none"
       />
 
       {/* Style Injection */}
@@ -437,7 +436,7 @@ export default function VoiceChat() {
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 
       <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-4">
-        {/* Header Logo */}
+        {/* Header */}
         <div
           className={`transition-all duration-500 ${
             isStarted ? "mb-4 scale-75" : "mb-10"
@@ -465,7 +464,7 @@ export default function VoiceChat() {
           </div>
         </div>
 
-        {/* SCENE 1: LOGIN */}
+        {/* LOGIN */}
         {!isStarted && (
           <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
             <p className="text-gray-400 text-center mb-6">
@@ -491,7 +490,7 @@ export default function VoiceChat() {
           </div>
         )}
 
-        {/* SCENE 2: SEARCHING */}
+        {/* SEARCHING */}
         {isStarted && isSearching && (
           <div className="flex flex-col items-center animate-pulse">
             <div className="relative mb-8">
@@ -510,7 +509,7 @@ export default function VoiceChat() {
           </div>
         )}
 
-        {/* SCENE 3: MATCHED */}
+        {/* MATCHED */}
         {isStarted && isMatched && (
           <div className="w-full max-w-sm relative">
             <div className="bg-gray-800/80 backdrop-blur-md border border-white/10 rounded-[2.5rem] p-6 shadow-2xl overflow-hidden relative">
@@ -521,7 +520,7 @@ export default function VoiceChat() {
                 </span>
               </div>
 
-              {/* ✅ ปุ่มแก้ปัญหาเสียง: แสดงเมื่อ Browser Block Autoplay */}
+              {/* Mute Button */}
               {audioError && (
                 <button
                   onClick={forcePlayAudio}
@@ -552,7 +551,6 @@ export default function VoiceChat() {
                   </h2>
                   <p className="text-gray-400 text-sm">Online Stranger</p>
                 </div>
-
                 <div className="flex items-center gap-1 h-8 mt-6">
                   {WAVE_DELAYS.map((delay, i) => (
                     <div
@@ -590,7 +588,6 @@ export default function VoiceChat() {
                   </div>
                   <span className="text-xs text-gray-500 font-medium">End</span>
                 </button>
-
                 <button
                   onClick={toggleLike}
                   className="flex flex-col items-center justify-center gap-1 group"
@@ -621,7 +618,6 @@ export default function VoiceChat() {
                     Like
                   </span>
                 </button>
-
                 <button
                   onClick={nextPartner}
                   className="flex flex-col items-center justify-center gap-1 group"
