@@ -37,7 +37,8 @@ const UserAvatar = ({ name, size = "large" }) => {
     return "#" + "00000".substring(0, 6 - c.length) + c;
   };
   const bgColor = stringToColor(name || "User");
-  const sizeClass = size === "large" ? "w-32 h-32 text-4xl" : "w-12 h-12 text-lg";
+  const sizeClass =
+    size === "large" ? "w-32 h-32 text-4xl" : "w-12 h-12 text-lg";
 
   return (
     <div
@@ -76,21 +77,45 @@ export default function VoiceChat() {
   // หมายเหตุ: หากต้องการให้คุยข้ามเน็ต 4G ได้ 100% ต้องไปเช่า TURN Server มาใส่ใน array นี้ครับ
   const iceServers = {
     iceServers: [
+      // STUN Servers
+      { urls: "stun:stun.relay.metered.ca:80" },
       { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun2.l.google.com:19302" },
-      { urls: "stun:stun3.l.google.com:19302" },
-      { urls: "stun:stun4.l.google.com:19302" },
+
+      // ✅ TURN Servers (Metered - ใส่ credentials ที่ได้จาก API Docs)
+      {
+        urls: "turn:global.relay.metered.ca:80",
+        username: "e79fd9d985751a7176e4e1de",
+        credential: "nkgrV/MuhOIUh8kC",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80?transport=tcp",
+        username: "e79fd9d985751a7176e4e1de",
+        credential: "nkgrV/MuhOIUh8kC",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: "e79fd9d985751a7176e4e1de",
+        credential: "nkgrV/MuhOIUh8kC",
+      },
+      {
+        urls: "turns:global.relay.metered.ca:443?transport=tcp",
+        username: "e79fd9d985751a7176e4e1de",
+        credential: "nkgrV/MuhOIUh8kC",
+      },
     ],
   };
 
   const addToast = (message, type = "info") => {
     const id = Date.now();
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
+    setTimeout(
+      () => setToasts((prev) => prev.filter((t) => t.id !== id)),
+      3000
+    );
   };
 
-  const removeToast = (id) => setToasts((prev) => prev.filter((t) => t.id !== id));
+  const removeToast = (id) =>
+    setToasts((prev) => prev.filter((t) => t.id !== id));
 
   useEffect(() => {
     return () => cleanupResources();
@@ -107,21 +132,47 @@ export default function VoiceChat() {
   // ฟังก์ชันช่วยเล่นเสียง (ใช้แก้ปัญหา Mobile Autoplay)
   const forcePlayAudio = () => {
     if (remoteAudioRef.current && remoteAudioRef.current.srcObject) {
+      // ✅ เช็คและ enable audio tracks
+      const stream = remoteAudioRef.current.srcObject;
+      const audioTracks = stream.getAudioTracks();
+
+      console.log("🔧 Force play - Audio tracks:", audioTracks);
+      audioTracks.forEach((track) => {
+        console.log("Track enabled:", track.enabled, "muted:", track.muted);
+        track.enabled = true; // ✅ บังคับเปิด
+      });
+
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1.0;
+
       remoteAudioRef.current
         .play()
         .then(() => {
-          console.log("Audio resumed manually");
+          console.log("✅ Audio resumed manually");
           setAudioError(false);
+          addToast("Audio enabled!", "success");
         })
-        .catch((e) => console.error("Manual play failed", e));
+        .catch((e) => {
+          console.error("❌ Manual play failed", e);
+        });
     }
   };
 
   // ✅ Logic การต่อ Stream ที่ใช้ร่วมกันทั้งคนโทรและคนรับ
   const attachRemoteStream = (event) => {
     console.log("🔊 Received Remote Stream:", event.streams[0]);
+
+    // ✅ เช็ค audio tracks
+    const audioTracks = event.streams[0].getAudioTracks();
+    console.log("📡 Audio tracks:", audioTracks.length, audioTracks);
+
     if (remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = event.streams[0];
+
+      // ✅ บังคับ unmute และ set volume
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1.0;
+
       remoteAudioRef.current
         .play()
         .then(() => {
@@ -129,8 +180,8 @@ export default function VoiceChat() {
           setAudioError(false);
         })
         .catch((e) => {
-          console.error("❌ Auto-play failed (Browser blocked):", e);
-          setAudioError(true); // แจ้งเตือนให้ user กดปุ่มเปิดเสียง
+          console.error("❌ Auto-play failed:", e);
+          setAudioError(true);
           addToast("Tap the speaker icon to enable sound", "error");
         });
     }
@@ -204,7 +255,8 @@ export default function VoiceChat() {
   const startCall = async () => {
     try {
       console.log("🚀 Starting call...");
-      if (!navigator.mediaDevices) throw new Error("Media devices not supported");
+      if (!navigator.mediaDevices)
+        throw new Error("Media devices not supported");
 
       localStreamRef.current = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -353,7 +405,13 @@ export default function VoiceChat() {
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-purple-500 selection:text-white overflow-hidden relative">
       {/* ✅ AUDIO ELEMENT ย้ายมาอยู่นอกสุด เพื่อให้ทำงานตลอดเวลา */}
-      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        muted={false}
+        className="hidden"
+      />
 
       {/* Style Injection */}
       <style
@@ -380,11 +438,25 @@ export default function VoiceChat() {
 
       <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-4">
         {/* Header Logo */}
-        <div className={`transition-all duration-500 ${isStarted ? "mb-4 scale-75" : "mb-10"}`}>
+        <div
+          className={`transition-all duration-500 ${
+            isStarted ? "mb-4 scale-75" : "mb-10"
+          }`}
+        >
           <div className="flex flex-col items-center">
             <div className="w-16 h-16 bg-gradient-to-tr from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-500/30 mb-4 transform rotate-3">
-              <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              <svg
+                className="w-8 h-8 text-white"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
               </svg>
             </div>
             <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
@@ -396,7 +468,9 @@ export default function VoiceChat() {
         {/* SCENE 1: LOGIN */}
         {!isStarted && (
           <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
-            <p className="text-gray-400 text-center mb-6">Enter a nickname to start talking with strangers anonymously.</p>
+            <p className="text-gray-400 text-center mb-6">
+              Enter a nickname to start talking with strangers anonymously.
+            </p>
             <div className="space-y-4">
               <input
                 type="text"
@@ -424,8 +498,13 @@ export default function VoiceChat() {
               <div className="w-32 h-32 bg-purple-500/20 rounded-full absolute inset-0 animate-ping"></div>
               <UserAvatar name={nickname} />
             </div>
-            <h2 className="text-2xl font-semibold text-white mb-2">Searching...</h2>
-            <button onClick={endCall} className="mt-8 text-gray-500 hover:text-red-400 text-sm font-medium transition-colors">
+            <h2 className="text-2xl font-semibold text-white mb-2">
+              Searching...
+            </h2>
+            <button
+              onClick={endCall}
+              className="mt-8 text-gray-500 hover:text-red-400 text-sm font-medium transition-colors"
+            >
               Cancel
             </button>
           </div>
@@ -437,7 +516,9 @@ export default function VoiceChat() {
             <div className="bg-gray-800/80 backdrop-blur-md border border-white/10 rounded-[2.5rem] p-6 shadow-2xl overflow-hidden relative">
               <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-1 bg-green-500/20 border border-green-500/30 rounded-full">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-xs font-bold text-green-400 uppercase tracking-wider">Live</span>
+                <span className="text-xs font-bold text-green-400 uppercase tracking-wider">
+                  Live
+                </span>
               </div>
 
               {/* ✅ ปุ่มแก้ปัญหาเสียง: แสดงเมื่อ Browser Block Autoplay */}
@@ -446,8 +527,18 @@ export default function VoiceChat() {
                   onClick={forcePlayAudio}
                   className="absolute top-6 right-6 flex items-center gap-2 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg z-50 animate-bounce"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+                    />
                   </svg>
                   <span className="text-xs font-bold">Tap to Unmute</span>
                 </button>
@@ -456,7 +547,9 @@ export default function VoiceChat() {
               <div className="flex flex-col items-center mt-8 mb-6">
                 <UserAvatar name={partnerName} size="large" />
                 <div className="mt-6 text-center">
-                  <h2 className="text-3xl font-bold text-white mb-1">{partnerName}</h2>
+                  <h2 className="text-3xl font-bold text-white mb-1">
+                    {partnerName}
+                  </h2>
                   <p className="text-gray-400 text-sm">Online Stranger</p>
                 </div>
 
@@ -476,31 +569,81 @@ export default function VoiceChat() {
               </div>
 
               <div className="grid grid-cols-3 gap-4 mt-8">
-                <button onClick={endCall} className="flex flex-col items-center justify-center gap-1 group">
+                <button
+                  onClick={endCall}
+                  className="flex flex-col items-center justify-center gap-1 group"
+                >
                   <div className="w-14 h-14 bg-gray-700/50 rounded-full flex items-center justify-center group-hover:bg-red-500/20 group-hover:text-red-500 transition-all">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    <svg
+                      className="w-6 h-6"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </div>
                   <span className="text-xs text-gray-500 font-medium">End</span>
                 </button>
 
-                <button onClick={toggleLike} className="flex flex-col items-center justify-center gap-1 group">
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-all transform hover:scale-110 shadow-lg ${liked ? "bg-pink-500 text-white" : "bg-white text-pink-500"}`}>
-                    <svg className={`w-8 h-8 ${liked ? "fill-current" : "fill-none"}`} stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                <button
+                  onClick={toggleLike}
+                  className="flex flex-col items-center justify-center gap-1 group"
+                >
+                  <div
+                    className={`w-16 h-16 rounded-full flex items-center justify-center transition-all transform hover:scale-110 shadow-lg ${
+                      liked
+                        ? "bg-pink-500 text-white"
+                        : "bg-white text-pink-500"
+                    }`}
+                  >
+                    <svg
+                      className={`w-8 h-8 ${
+                        liked ? "fill-current" : "fill-none"
+                      }`}
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                      />
                     </svg>
                   </div>
-                  <span className="text-xs text-gray-500 font-medium">Like</span>
+                  <span className="text-xs text-gray-500 font-medium">
+                    Like
+                  </span>
                 </button>
 
-                <button onClick={nextPartner} className="flex flex-col items-center justify-center gap-1 group">
+                <button
+                  onClick={nextPartner}
+                  className="flex flex-col items-center justify-center gap-1 group"
+                >
                   <div className="w-14 h-14 bg-gray-700/50 rounded-full flex items-center justify-center group-hover:bg-purple-500/20 group-hover:text-purple-400 transition-all">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    <svg
+                      className="w-6 h-6"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13 5l7 7-7 7M5 5l7 7-7 7"
+                      />
                     </svg>
                   </div>
-                  <span className="text-xs text-gray-500 font-medium">Next</span>
+                  <span className="text-xs text-gray-500 font-medium">
+                    Next
+                  </span>
                 </button>
               </div>
             </div>
