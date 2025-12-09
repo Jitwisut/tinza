@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+const api = process.env.NEXT_PUBLIC_WS_API;
 
 // --- Sub-components for UI ---
 
@@ -175,7 +176,7 @@ export default function VoiceChat() {
     // ถ้า run local ปกติจะเป็น ws://localhost:3000 (ถ้ามี Custom Server)
     // หรือต้องมี backend แยกต่างหาก
     try {
-      wsRef.current = new WebSocket("ws://localhost:3000/match");
+      wsRef.current = new WebSocket(`${api}/match`);
     } catch (e) {
       console.error(e);
       addToast("Cannot connect to server", "error");
