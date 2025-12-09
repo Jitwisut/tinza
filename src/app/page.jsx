@@ -236,30 +236,61 @@ export default function VoiceChat() {
 
   const startCall = async () => {
     try {
+      console.log("🚀 Starting call..."); // Log เริ่มต้น
+
       if (!navigator.mediaDevices) {
         throw new Error("Media devices not supported");
       }
 
+      // 1. Get Local Stream
       localStreamRef.current = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: false,
       });
+      console.log("✅ Microphone accessed");
+
+      // 2. Create Peer Connection
+      // ตรวจสอบตัวแปร iceServers ให้แน่ใจว่าประกาศไว้ถูกต้องข้างบน component
       peerConnectionRef.current = new RTCPeerConnection(iceServers);
 
+      // 3. Add Tracks to Connection
       localStreamRef.current.getTracks().forEach((track) => {
         peerConnectionRef.current.addTrack(track, localStreamRef.current);
       });
 
+      // 4. Handle Remote Stream (จุดสำคัญเรื่องเสียง)
       peerConnectionRef.current.ontrack = (event) => {
+        console.log("🔊 Stream Received from Partner:", event.streams);
+        const [remoteStream] = event.streams;
+
         if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = event.streams[0];
-          // Ensure play is called
+          console.log("🔗 Attaching stream to audio element...");
+          remoteAudioRef.current.srcObject = remoteStream;
+
+          // บังคับเล่นเสียง
           remoteAudioRef.current
             .play()
-            .catch((e) => console.error("Auto-play blocked:", e));
+            .then(() => console.log("🎶 Audio playing successfully"))
+            .catch((e) => console.error("❌ Auto-play failed:", e));
+        } else {
+          // ถ้า Ref ยังไม่มา (เพราะ React Render ไม่ทัน) ให้ Log เตือน
+          console.error(
+            "❌ Error: remoteAudioRef is null! (Audio element missing)"
+          );
+
+          // *Hack แก้ขัด: ถ้า Ref ยังไม่มี ให้ลองหา element ตรงๆ จาก ID (ถ้าคุณใส่ id="remote-audio" ไว้ที่ tag audio)
+          const fallbackAudio = document.getElementById("remote-audio"); // ต้องเพิ่ม id="remote-audio" ที่ JSX
+          if (fallbackAudio) {
+            console.log("⚠️ Found audio via ID fallback");
+            fallbackAudio.srcObject = remoteStream;
+            fallbackAudio
+              .play()
+              .catch((e) => console.error("Fallback play error", e));
+          }
         }
       };
 
+      // 5. Handle ICE Candidates
       peerConnectionRef.current.onicecandidate = (event) => {
         if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(
@@ -272,10 +303,13 @@ export default function VoiceChat() {
         }
       };
 
+      // 6. Create Offer
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
 
+      // 7. Send Offer via WebSocket
       if (wsRef.current?.readyState === WebSocket.OPEN) {
+        console.log("📤 Sending Offer...");
         wsRef.current.send(
           JSON.stringify({
             type: "offer",
@@ -285,7 +319,7 @@ export default function VoiceChat() {
         );
       }
     } catch (error) {
-      console.error("Error starting call:", error);
+      console.error("❌ Error starting call:", error);
       addToast("Microphone access denied or error.", "error");
     }
   };
@@ -405,6 +439,7 @@ export default function VoiceChat() {
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-purple-500 selection:text-white overflow-hidden relative">
       {/* Inject Keyframes Styles locally to avoid config issues */}
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -502,8 +537,6 @@ export default function VoiceChat() {
         {/* --- SCENE 3: MATCHED --- */}
         {isStarted && isMatched && (
           <div className="w-full max-w-sm relative">
-            <audio ref={remoteAudioRef} autoPlay playsInline />
-
             <div className="bg-gray-800/80 backdrop-blur-md border border-white/10 rounded-[2.5rem] p-6 shadow-2xl overflow-hidden relative">
               <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-1 bg-green-500/20 border border-green-500/30 rounded-full">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
