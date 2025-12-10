@@ -102,6 +102,10 @@ export default function VoiceChat() {
   const remoteAudioRef = useRef(null);
   const partnerIdRef = useRef(null);
 
+  // ✅ เพิ่ม refs สำหรับแก้ปัญหา
+  const pendingCandidatesRef = useRef([]);
+  const isNegotiatingRef = useRef(false);
+
   const WAVE_DELAYS = [0.1, 0.3, 0.5, 0.2, 0.4, 0.6, 0.3, 0.5];
 
   const addToast = (message, type = "info") => {
@@ -126,6 +130,9 @@ export default function VoiceChat() {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
     }
+    // ✅ Clear pending candidates
+    pendingCandidatesRef.current = [];
+    isNegotiatingRef.current = false;
   };
 
   const forcePlayAudio = () => {
@@ -160,6 +167,9 @@ export default function VoiceChat() {
       console.log("🧊 ICE State:", state);
       if (state === "failed" || state === "disconnected") {
         addToast("Connection unstable/failed", "error");
+      } else if (state === "connected" || state === "completed") {
+        console.log("✅ ICE Connected!");
+        addToast("Connection established", "success");
       }
     };
 
@@ -188,6 +198,7 @@ export default function VoiceChat() {
 
     pc.onicecandidate = (event) => {
       if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
+        console.log("📤 Sending ICE candidate");
         wsRef.current.send(
           JSON.stringify({
             type: "ice",
@@ -221,12 +232,14 @@ export default function VoiceChat() {
     }
 
     wsRef.current.onopen = () => {
+      console.log("🔌 WebSocket Connected");
       wsRef.current.send(JSON.stringify({ type: "find_partner", nickname }));
     };
 
     wsRef.current.onmessage = async (event) => {
       try {
         const data = JSON.parse(event.data);
+        console.log("📩 Received:", data.type);
 
         if (data.type === "waiting") {
           setStatus(data.message);
@@ -238,14 +251,18 @@ export default function VoiceChat() {
           setIsMatched(true);
           setLiked(false);
           setAudioError(false);
+          // ✅ Reset pending candidates
+          pendingCandidatesRef.current = [];
+          isNegotiatingRef.current = false;
+
           addToast(`Matched with ${data.partnerNickname}!`, "success");
 
-          // ✅ FIX: เช็ค initiator! ถ้าเป็น true ค่อยโทร, ถ้า false รอนิ่งๆ
+          // ✅ ถ้าเป็น initiator ค่อยโทร
           if (data.initiator) {
-            console.log("I am initiator, starting call...");
+            console.log("👤 I am initiator, starting call...");
             await startCall();
           } else {
-            console.log("I am receiver, waiting for offer...");
+            console.log("👥 I am receiver, waiting for offer...");
           }
         } else if (data.type === "offer") {
           await handleOffer(data.offer);
@@ -271,6 +288,10 @@ export default function VoiceChat() {
       addToast("Connection failed", "error");
       setIsStarted(false);
     };
+
+    wsRef.current.onclose = () => {
+      console.log("🔌 WebSocket Closed");
+    };
   };
 
   const startCall = async () => {
@@ -280,18 +301,27 @@ export default function VoiceChat() {
         throw new Error("Media devices not supported");
 
       localStreamRef.current = await navigator.mediaDevices.getUserMedia({
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
         video: false,
       });
+
+      console.log("🎤 Microphone access granted");
 
       peerConnectionRef.current = setupPeerConnection();
 
       localStreamRef.current.getTracks().forEach((track) => {
+        console.log("➕ Adding local track:", track.kind);
         peerConnectionRef.current.addTrack(track, localStreamRef.current);
       });
 
       const offer = await peerConnectionRef.current.createOffer();
       await peerConnectionRef.current.setLocalDescription(offer);
+
+      console.log("📤 Sending offer");
 
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(
@@ -304,44 +334,93 @@ export default function VoiceChat() {
       }
     } catch (error) {
       console.error("❌ Error starting call:", error);
-      addToast("Microphone access denied", "error");
+      addToast("Microphone access denied or unavailable", "error");
+      setStatus("Microphone error - Please allow access");
     }
   };
 
+  // ✅ แก้ไข handleOffer
   const handleOffer = async (offer) => {
+    if (isNegotiatingRef.current) {
+      console.warn("⚠️ Already negotiating, skipping duplicate offer");
+      return;
+    }
+
+    isNegotiatingRef.current = true;
+
     try {
+      console.log("📥 Handling offer...");
+
       if (!localStreamRef.current) {
+        console.log("🎤 Getting microphone access...");
         localStreamRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
           video: false,
         });
+        console.log("✅ Microphone granted");
       }
 
       // Receiver สร้าง PC เพื่อรับ Offer
       peerConnectionRef.current = setupPeerConnection();
 
       localStreamRef.current.getTracks().forEach((track) => {
+        console.log("➕ Adding local track:", track.kind);
         peerConnectionRef.current.addTrack(track, localStreamRef.current);
       });
 
       await peerConnectionRef.current.setRemoteDescription(offer);
+      console.log("✅ Remote description set (offer)");
+
+      // ✅ Process pending ICE candidates
+      console.log(
+        `📦 Processing ${pendingCandidatesRef.current.length} pending ICE candidates`
+      );
+      while (pendingCandidatesRef.current.length > 0) {
+        const candidate = pendingCandidatesRef.current.shift();
+        try {
+          await peerConnectionRef.current.addIceCandidate(candidate);
+          console.log("✅ Added pending ICE candidate");
+        } catch (err) {
+          console.error("❌ Error adding pending candidate:", err);
+        }
+      }
+
       const answer = await peerConnectionRef.current.createAnswer();
       await peerConnectionRef.current.setLocalDescription(answer);
 
-      wsRef.current.send(
-        JSON.stringify({
-          type: "answer",
-          answer: answer,
-          partnerId: partnerIdRef.current,
-        })
-      );
+      console.log("📤 Sending answer");
+
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "answer",
+            answer: answer,
+            partnerId: partnerIdRef.current,
+          })
+        );
+      }
     } catch (error) {
-      console.error(error);
+      console.error("❌ Handle Offer Error:", error);
+      addToast("Failed to connect - " + error.message, "error");
+    } finally {
+      isNegotiatingRef.current = false;
     }
   };
 
+  // ✅ แก้ไข handleAnswer
   const handleAnswer = async (answer) => {
     try {
+      console.log("📥 Handling answer...");
+
+      if (!peerConnectionRef.current) {
+        console.error("❌ No peer connection exists");
+        return;
+      }
+
       // ✅ เช็ค State ก่อน Set Remote
       if (peerConnectionRef.current.signalingState === "stable") {
         console.warn(
@@ -349,19 +428,51 @@ export default function VoiceChat() {
         );
         return;
       }
+
       await peerConnectionRef.current.setRemoteDescription(answer);
+      console.log("✅ Remote description set (answer)");
+
+      // ✅ Process pending ICE candidates
+      console.log(
+        `📦 Processing ${pendingCandidatesRef.current.length} pending ICE candidates`
+      );
+      while (pendingCandidatesRef.current.length > 0) {
+        const candidate = pendingCandidatesRef.current.shift();
+        try {
+          await peerConnectionRef.current.addIceCandidate(candidate);
+          console.log("✅ Added pending ICE candidate");
+        } catch (err) {
+          console.error("❌ Error adding pending candidate:", err);
+        }
+      }
     } catch (error) {
-      console.error("Handle Answer Error:", error);
+      console.error("❌ Handle Answer Error:", error);
+      addToast("Connection setup failed", "error");
     }
   };
 
+  // ✅ แก้ไข handleIceCandidate - มี queue mechanism
   const handleIceCandidate = async (candidate) => {
     try {
-      if (peerConnectionRef.current) {
+      console.log("📥 Received ICE candidate");
+
+      if (!peerConnectionRef.current) {
+        console.warn("⚠️ No peer connection, queuing candidate");
+        pendingCandidatesRef.current.push(candidate);
+        return;
+      }
+
+      // ✅ Check ว่ามี remote description แล้วหรือยัง
+      if (peerConnectionRef.current.remoteDescription) {
         await peerConnectionRef.current.addIceCandidate(candidate);
+        console.log("✅ ICE candidate added immediately");
+      } else {
+        console.log("⏳ Remote description not set yet, queuing candidate");
+        pendingCandidatesRef.current.push(candidate);
       }
     } catch (error) {
-      console.error("ICE Error:", error);
+      console.error("❌ ICE Candidate Error:", error);
+      // ไม่ต้อง toast ทุกครั้ง เพราะอาจมี candidates เยอะ
     }
   };
 
@@ -371,7 +482,10 @@ export default function VoiceChat() {
     setIsSearching(true);
     setPartnerName("");
     setStatus("Looking for a new partner...");
-    if (wsRef.current) {
+    pendingCandidatesRef.current = [];
+    isNegotiatingRef.current = false;
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "next", nickname }));
     }
   };
@@ -386,6 +500,10 @@ export default function VoiceChat() {
       localStreamRef.current = null;
     }
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+
+    // ✅ Clear pending candidates
+    pendingCandidatesRef.current = [];
+    isNegotiatingRef.current = false;
   };
 
   const toggleLike = () => {
@@ -520,7 +638,7 @@ export default function VoiceChat() {
                 </span>
               </div>
 
-              {/* Mute Button */}
+              {/* Unmute Button */}
               {audioError && (
                 <button
                   onClick={forcePlayAudio}
